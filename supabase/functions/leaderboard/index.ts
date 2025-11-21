@@ -63,10 +63,10 @@ async function buildFullLeaderboard(): Promise<CacheData> {
       console.log("Sample entry:", JSON.stringify(leaderboardData.entries[0]));
     }
 
-    // Process leaderboard entries
+    // Process leaderboard entries - preserve API order (official leaderboard order)
     const entries: LeaderboardEntry[] = (leaderboardData.entries || []).map((entry: any, index: number) => {
-      const participation = entry.participation || entry.participations || 0;
-      const rewards = entry.trainingRewards || entry.training_rewards || entry.wins || 0;
+      const participation = entry.participation ?? entry.participations ?? entry.score ?? 0;
+      const rewards = entry.trainingRewards ?? entry.training_rewards ?? entry.reward ?? 0;
       
       console.log(`Entry ${index}: peerId=${entry.peerId}, participation=${participation}, rewards=${rewards}`);
       
@@ -78,16 +78,8 @@ async function buildFullLeaderboard(): Promise<CacheData> {
       };
     });
 
-    // Sort by participations (DESC), then wins (DESC), then peerId (ASC)
-    entries.sort((a, b) => {
-      if (b.participations !== a.participations) {
-        return b.participations - a.participations;
-      }
-      if (b.wins !== a.wins) {
-        return b.wins - a.wins;
-      }
-      return a.peerId.localeCompare(b.peerId);
-    });
+    // Do NOT resort - keep server-provided order so ranks match official leaderboard
+    // entries.sort(...);
 
     // Reassign ranks after sorting
     entries.forEach((entry, index) => {
