@@ -133,8 +133,6 @@ const Index = () => {
         <StatsCards
           currentRound={stats.currentRound}
           currentStage={stats.currentStage}
-          uniqueVoters={stats.uniqueVoters}
-          uniqueVotedPeers={stats.uniqueVotedPeers}
         />
 
         {/* Info Panel */}
