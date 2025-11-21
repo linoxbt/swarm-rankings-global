@@ -86,13 +86,16 @@ async function buildFullLeaderboard(): Promise<CacheData> {
       entry.rank = index + 1;
     });
 
+    console.log("Network stats data:", JSON.stringify(networkStatsData));
+    console.log("Nodes connected data:", JSON.stringify(nodesConnectedData));
+    
     const result: CacheData = {
       entries,
       updatedAt: leaderboardData.updatedAt || new Date().toISOString(),
       stats: {
-        currentRound: networkStatsData.transactions || 0,
-        currentStage: nodesConnectedData.nodesConnected || 0,
-        uniqueVoters: uniqueVotersData.uniqueVoters || 0,
+        currentRound: networkStatsData?.transactions || networkStatsData?.total || 0,
+        currentStage: nodesConnectedData?.nodesConnected || nodesConnectedData?.count || 0,
+        uniqueVoters: uniqueVotersData?.uniqueVoters || uniqueVotersData?.count || 0,
         uniqueVotedPeers: entries.length,
       },
     };
