@@ -11,22 +11,22 @@ interface StatsCardsProps {
 export const StatsCards = ({ currentRound, currentStage, uniqueVoters, uniqueVotedPeers }: StatsCardsProps) => {
   const stats = [
     {
-      title: "Current Round",
+      title: "Total Transactions",
       value: currentRound.toLocaleString(),
       icon: Activity,
     },
     {
-      title: "Current Stage",
+      title: "Connected Nodes",
       value: currentStage.toLocaleString(),
       icon: Target,
     },
     {
-      title: "Unique Voters",
+      title: "Active Users",
       value: uniqueVoters.toLocaleString(),
       icon: Users,
     },
     {
-      title: "Unique Voted Peers",
+      title: "Total Peers",
       value: uniqueVotedPeers.toLocaleString(),
       icon: TrendingUp,
     },
