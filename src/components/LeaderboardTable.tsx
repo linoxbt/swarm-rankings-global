@@ -50,9 +50,9 @@ export const LeaderboardTable = ({ entries, isLoading }: LeaderboardTableProps) 
           <TableHeader>
             <TableRow className="border-border hover:bg-secondary/50">
               <TableHead className="font-mono text-primary font-bold">Rank</TableHead>
-              <TableHead className="font-mono text-primary font-bold">Peer ID</TableHead>
-              <TableHead className="font-mono text-primary font-bold text-right">Participations</TableHead>
-              <TableHead className="font-mono text-primary font-bold text-right">Wins</TableHead>
+              <TableHead className="font-mono text-primary font-bold">ID</TableHead>
+              <TableHead className="font-mono text-primary font-bold text-right">Participation</TableHead>
+              <TableHead className="font-mono text-primary font-bold text-right">Training Rewards</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

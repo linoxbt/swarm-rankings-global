@@ -57,15 +57,26 @@ async function buildFullLeaderboard(): Promise<CacheData> {
     ]);
 
     console.log("API data fetched successfully");
-    console.log("Leaderboard entries:", leaderboardData.entries?.length || 0);
+    console.log("Raw leaderboard response:", JSON.stringify(leaderboardData).substring(0, 500));
+    console.log("Leaderboard entries count:", leaderboardData.entries?.length || 0);
+    if (leaderboardData.entries?.length > 0) {
+      console.log("Sample entry:", JSON.stringify(leaderboardData.entries[0]));
+    }
 
     // Process leaderboard entries
-    const entries: LeaderboardEntry[] = (leaderboardData.entries || []).map((entry: any, index: number) => ({
-      rank: index + 1,
-      peerId: entry.peerId,
-      participations: entry.participation || 0,
-      wins: entry.trainingRewards || 0,
-    }));
+    const entries: LeaderboardEntry[] = (leaderboardData.entries || []).map((entry: any, index: number) => {
+      const participation = entry.participation || entry.participations || 0;
+      const rewards = entry.trainingRewards || entry.training_rewards || entry.wins || 0;
+      
+      console.log(`Entry ${index}: peerId=${entry.peerId}, participation=${participation}, rewards=${rewards}`);
+      
+      return {
+        rank: index + 1,
+        peerId: entry.peerId,
+        participations: participation,
+        wins: rewards,
+      };
+    });
 
     // Sort by participations (DESC), then wins (DESC), then peerId (ASC)
     entries.sort((a, b) => {
