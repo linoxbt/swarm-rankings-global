@@ -89,12 +89,21 @@ async function buildFullLeaderboard(): Promise<CacheData> {
     console.log("Network stats data:", JSON.stringify(networkStatsData));
     console.log("Nodes connected data:", JSON.stringify(nodesConnectedData));
     
+    // Extract models trained from network-stats (completedTransactions)
+    const modelsTrained = networkStatsData?.completedTransactions || 0;
+    
+    // Extract nodes connected from nodes-connected (count)
+    const nodesConnected = nodesConnectedData?.count || 0;
+    
+    console.log("Extracted models trained:", modelsTrained);
+    console.log("Extracted nodes connected:", nodesConnected);
+    
     const result: CacheData = {
       entries,
       updatedAt: leaderboardData.updatedAt || new Date().toISOString(),
       stats: {
-        currentRound: networkStatsData?.transactions || networkStatsData?.total || 0,
-        currentStage: nodesConnectedData?.nodesConnected || nodesConnectedData?.count || 0,
+        currentRound: modelsTrained,
+        currentStage: nodesConnected,
         uniqueVoters: uniqueVotersData?.uniqueVoters || uniqueVotersData?.count || 0,
         uniqueVotedPeers: entries.length,
       },
