@@ -192,7 +192,9 @@ serve(async (req) => {
     const data = await buildFullLeaderboard();
     
     const total = data.entries.length;
-    const pageEntries = data.entries.slice(offset, offset + limit);
+
+    // Always return the full leaderboard so the frontend can paginate over ALL peers
+    const pageEntries = data.entries;
 
     return new Response(
       JSON.stringify({
