@@ -48,40 +48,88 @@ async function buildFullLeaderboard(): Promise<CacheData> {
   }
 
   try {
-    // Fetch all data in parallel
-    const [leaderboardData, networkStatsData, nodesConnectedData, uniqueVotersData] = await Promise.all([
+    // Fetch all data in parallel from multiple endpoints
+    const [leaderboardData, networkStatsData, nodesConnectedData, uniqueVotersData, gossipData, topRewardsData] = await Promise.all([
       fetchGensynAPI('/leaderboard'),
       fetchGensynAPI('/network-stats'),
       fetchGensynAPI('/nodes-connected'),
       fetchGensynAPI('/unique-voters'),
+      fetchGensynAPI('/gossip-messages'),
+      fetchGensynAPI('/top-rewards'),
     ]);
 
     console.log("API data fetched successfully");
-    console.log("Raw leaderboard response:", JSON.stringify(leaderboardData).substring(0, 500));
-    console.log("Leaderboard entries count:", leaderboardData.entries?.length || 0);
-    if (leaderboardData.entries?.length > 0) {
-      console.log("Sample entry:", JSON.stringify(leaderboardData.entries[0]));
-    }
+    console.log("Leaderboard entries:", leaderboardData.entries?.length || 0);
+    console.log("Gossip peers:", gossipData.peers?.length || 0);
+    console.log("Top rewards:", topRewardsData.rewards?.length || 0);
 
-    // Process leaderboard entries - preserve API order (official leaderboard order)
-    const entries: LeaderboardEntry[] = (leaderboardData.entries || []).map((entry: any, index: number) => {
+    // Build a map of all unique peers with their metrics
+    const peerMap = new Map<string, { participations: number; wins: number }>();
+
+    // Add peers from leaderboard (top 100 with full stats)
+    (leaderboardData.entries || []).forEach((entry: any) => {
       const participation = entry.participation ?? entry.participations ?? entry.score ?? 0;
       const rewards = entry.trainingRewards ?? entry.training_rewards ?? entry.reward ?? 0;
       
-      console.log(`Entry ${index}: peerId=${entry.peerId}, participation=${participation}, rewards=${rewards}`);
-      
-      return {
-        rank: index + 1,
-        peerId: entry.peerId,
+      peerMap.set(entry.peerId, {
         participations: participation,
         wins: rewards,
-      };
+      });
     });
 
-    // Do NOT resort - keep server-provided order so ranks match official leaderboard
-    // entries.sort(...);
+    // Add peers from gossip messages (all active peers)
+    (gossipData.peers || []).forEach((peer: any) => {
+      const peerId = peer.peerId || peer.peer_id || peer.id;
+      if (peerId && !peerMap.has(peerId)) {
+        peerMap.set(peerId, {
+          participations: peer.participations || peer.score || 0,
+          wins: peer.rewards || peer.reward || 0,
+        });
+      }
+    });
 
-    // Reassign ranks after sorting
+    // Add/update peers from top rewards
+    (topRewardsData.rewards || []).forEach((entry: any) => {
+      const peerId = entry.peerId || entry.peer_id;
+      if (peerId) {
+        const existing = peerMap.get(peerId);
+        const rewards = entry.totalRewards || entry.total_rewards || entry.reward || 0;
+        
+        if (existing) {
+          existing.wins = Math.max(existing.wins, rewards);
+        } else {
+          peerMap.set(peerId, {
+            participations: entry.participations || entry.score || 0,
+            wins: rewards,
+          });
+        }
+      }
+    });
+
+    console.log(`Total unique peers found: ${peerMap.size}`);
+
+    // Convert map to array and sort by participation (desc), then wins (desc), then peerId (asc)
+    const entries: LeaderboardEntry[] = Array.from(peerMap.entries())
+      .map(([peerId, metrics]) => ({
+        rank: 0,
+        peerId,
+        participations: metrics.participations,
+        wins: metrics.wins,
+      }))
+      .sort((a, b) => {
+        // Sort by participations (descending)
+        if (b.participations !== a.participations) {
+          return b.participations - a.participations;
+        }
+        // Tie-break by wins (descending)
+        if (b.wins !== a.wins) {
+          return b.wins - a.wins;
+        }
+        // Tie-break by peerId (ascending)
+        return a.peerId.localeCompare(b.peerId);
+      });
+
+    // Assign ranks
     entries.forEach((entry, index) => {
       entry.rank = index + 1;
     });
