@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,7 +40,7 @@ async function fetchGensynAPI(endpoint: string) {
 }
 
 async function buildFullLeaderboard(): Promise<CacheData> {
-  console.log("Building full leaderboard from Gensyn API...");
+  console.log("Building full leaderboard from Gensyn API and blockchain events...");
   
   const now = Date.now();
   if (cache && (now - cacheTimestamp) < CACHE_TTL) {
@@ -62,6 +63,23 @@ async function buildFullLeaderboard(): Promise<CacheData> {
     console.log("Leaderboard entries:", leaderboardData.entries?.length || 0);
     console.log("Gossip peers:", gossipData.peers?.length || 0);
     console.log("Top rewards:", topRewardsData.rewards?.length || 0);
+
+    // Fetch blockchain events from database
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+    );
+
+    const { data: blockchainEvents, error: dbError } = await supabase
+      .from('winner_events')
+      .select('peer_id, round_number')
+      .order('block_number', { ascending: true });
+
+    if (dbError) {
+      console.error('Error fetching blockchain events:', dbError);
+    } else {
+      console.log(`Blockchain events from DB: ${blockchainEvents?.length || 0}`);
+    }
 
     // Build a map of all unique peers with their metrics
     const peerMap = new Map<string, { participations: number; wins: number }>();
@@ -106,7 +124,26 @@ async function buildFullLeaderboard(): Promise<CacheData> {
       }
     });
 
-    console.log(`Total unique peers found: ${peerMap.size}`);
+    // Add peers from blockchain winner events
+    if (blockchainEvents && blockchainEvents.length > 0) {
+      blockchainEvents.forEach((event: any) => {
+        const peerId = event.peer_id;
+        if (peerId) {
+          const existing = peerMap.get(peerId);
+          if (existing) {
+            existing.participations += 1;
+            existing.wins += 1;
+          } else {
+            peerMap.set(peerId, {
+              participations: 1,
+              wins: 1,
+            });
+          }
+        }
+      });
+    }
+
+    console.log(`Total unique peers found (API + Blockchain): ${peerMap.size}`);
 
     // Convert map to array and sort by participation (desc), then wins (desc), then peerId (asc)
     const entries: LeaderboardEntry[] = Array.from(peerMap.entries())
