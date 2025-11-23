@@ -2,3 +2,6 @@ project_id = "eyumxshhnticlmnpxuhv"
 
 [functions.leaderboard]
 verify_jwt = false
+
+[functions.blockchain-listener]
+verify_jwt = false

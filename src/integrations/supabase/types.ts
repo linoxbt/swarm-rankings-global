@@ -14,7 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      blockchain_sync_metadata: {
+        Row: {
+          contract_address: string
+          id: string
+          last_sync_timestamp: string | null
+          last_synced_block: number
+          updated_at: string | null
+        }
+        Insert: {
+          contract_address: string
+          id?: string
+          last_sync_timestamp?: string | null
+          last_synced_block?: number
+          updated_at?: string | null
+        }
+        Update: {
+          contract_address?: string
+          id?: string
+          last_sync_timestamp?: string | null
+          last_synced_block?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      winner_events: {
+        Row: {
+          block_number: number
+          created_at: string | null
+          event_timestamp: string | null
+          id: string
+          peer_id: string
+          round_number: number | null
+          transaction_hash: string
+        }
+        Insert: {
+          block_number: number
+          created_at?: string | null
+          event_timestamp?: string | null
+          id?: string
+          peer_id: string
+          round_number?: number | null
+          transaction_hash: string
+        }
+        Update: {
+          block_number?: number
+          created_at?: string | null
+          event_timestamp?: string | null
+          id?: string
+          peer_id?: string
+          round_number?: number | null
+          transaction_hash?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
