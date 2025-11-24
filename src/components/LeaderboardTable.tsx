@@ -19,6 +19,7 @@ interface LeaderboardEntry {
 interface LeaderboardTableProps {
   entries: LeaderboardEntry[];
   isLoading?: boolean;
+  onPeerClick?: (entry: LeaderboardEntry) => void;
 }
 
 const truncatePeerId = (peerId: string): string => {
@@ -26,7 +27,7 @@ const truncatePeerId = (peerId: string): string => {
   return `${peerId.substring(0, 10)}...${peerId.substring(peerId.length - 8)}`;
 };
 
-export const LeaderboardTable = ({ entries, isLoading }: LeaderboardTableProps) => {
+export const LeaderboardTable = ({ entries, isLoading, onPeerClick }: LeaderboardTableProps) => {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -57,7 +58,11 @@ export const LeaderboardTable = ({ entries, isLoading }: LeaderboardTableProps) 
           </TableHeader>
           <TableBody>
             {entries.map((entry) => (
-              <TableRow key={`${entry.rank}-${entry.peerId}`} className="border-border hover:bg-secondary/30">
+              <TableRow
+                key={`${entry.rank}-${entry.peerId}`}
+                className="border-border hover:bg-secondary/30 cursor-pointer"
+                onClick={() => onPeerClick?.(entry)}
+              >
                 <TableCell className="font-mono font-bold">
                   {entry.rank <= 3 ? (
                     <Badge variant={entry.rank === 1 ? "default" : "secondary"} className="font-mono">
