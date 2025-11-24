@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface LeaderboardEntry {
   rank: number;
@@ -37,6 +38,11 @@ const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [pageSize, setPageSize] = useState(50);
   const [currentPage, setCurrentPage] = useState(0);
+  const [selectedPeer, setSelectedPeer] = useState<LeaderboardEntry | null>(null);
+  const [peerDetailsOpen, setPeerDetailsOpen] = useState(false);
+  const [peerLastSeen, setPeerLastSeen] = useState<string | null>(null);
+  const [peerOnline, setPeerOnline] = useState<boolean | null>(null);
+  const [peerLoading, setPeerLoading] = useState(false);
   const { toast } = useToast();
 
   const fetchLeaderboard = async () => {
@@ -64,6 +70,45 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadPeerActivity = async (peerId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("winner_events")
+        .select("event_timestamp")
+        .eq("peer_id", peerId)
+        .order("event_timestamp", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error loading peer activity:", error);
+        return;
+      }
+
+      if (!data || !data.event_timestamp) {
+        setPeerLastSeen(null);
+        setPeerOnline(false);
+        return;
+      }
+
+      const lastSeenDate = new Date(data.event_timestamp as string);
+      setPeerLastSeen(lastSeenDate.toLocaleString());
+
+      const diffMinutes = (Date.now() - lastSeenDate.getTime()) / (1000 * 60);
+      setPeerOnline(diffMinutes <= 30);
+    } catch (err) {
+      console.error("Unexpected error loading peer activity:", err);
+    }
+  };
+
+  const handlePeerClick = async (entry: LeaderboardEntry) => {
+    setSelectedPeer(entry);
+    setPeerDetailsOpen(true);
+    setPeerLoading(true);
+    await loadPeerActivity(entry.peerId);
+    setPeerLoading(false);
   };
 
   useEffect(() => {
@@ -173,7 +218,7 @@ const Index = () => {
         )}
 
         {/* Leaderboard Table */}
-        <LeaderboardTable entries={paginatedEntries} isLoading={loading} />
+        <LeaderboardTable entries={paginatedEntries} isLoading={loading} onPeerClick={handlePeerClick} />
 
         {/* Pagination */}
         {!loading && filteredEntries.length > 0 && (
@@ -205,6 +250,73 @@ const Index = () => {
             </div>
           </div>
         )}
+
+        {/* Peer Details Dialog */}
+        <Dialog
+          open={peerDetailsOpen}
+          onOpenChange={(open) => {
+            setPeerDetailsOpen(open);
+            if (!open) {
+              setSelectedPeer(null);
+              setPeerLastSeen(null);
+              setPeerOnline(null);
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="font-mono text-primary">Peer Details</DialogTitle>
+              <DialogDescription className="font-mono text-xs text-muted-foreground">
+                Detailed view for a single node, including recent on-chain activity.
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedPeer && (
+              <div className="space-y-3 font-mono text-sm">
+                <div>
+                  <span className="font-semibold text-muted-foreground">Peer ID:</span>
+                  <div className="mt-1 break-all text-foreground">{selectedPeer.peerId}</div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Rank</div>
+                    <div className="text-lg font-bold text-primary">#{selectedPeer.rank}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Participation (votes)</div>
+                    <div className="text-lg font-bold text-primary">{selectedPeer.participations}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Training Rewards (wins)</div>
+                    <div className="text-lg font-bold text-primary">{selectedPeer.wins}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Status</div>
+                    <div className="text-lg font-bold">
+                      {peerLoading && <span className="text-muted-foreground">Checking...</span>}
+                      {!peerLoading && peerOnline === null && (
+                        <span className="text-muted-foreground">No blockchain data yet</span>
+                      )}
+                      {!peerLoading && peerOnline === true && (
+                        <span className="text-emerald-400">Online / active</span>
+                      )}
+                      {!peerLoading && peerOnline === false && (
+                        <span className="text-destructive">Offline / inactive</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-muted-foreground border-t border-border pt-3">
+                  {peerLastSeen
+                    ? `Last on-chain activity: ${peerLastSeen} (UTC local time)`
+                    : "No on-chain winner events recorded yet for this peer."}
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Footer */}
         <footer className="mt-12 text-center">
