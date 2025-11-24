@@ -25,6 +25,11 @@ interface CacheData {
     uniqueVoters: number;
     uniqueVotedPeers: number;
   };
+  peerSources: {
+    fromApi: number;
+    fromBlockchain: number;
+    total: number;
+  };
 }
 
 let cache: CacheData | null = null;
@@ -82,7 +87,7 @@ async function buildFullLeaderboard(): Promise<CacheData> {
     }
 
     // Build a map of all unique peers with their metrics
-    const peerMap = new Map<string, { participations: number; wins: number }>();
+    const peerMap = new Map<string, { participations: number; wins: number; source: 'api' | 'blockchain' | 'both' }>();
 
     // Add peers from leaderboard (top 100 with full stats)
     (leaderboardData.entries || []).forEach((entry: any) => {
@@ -92,6 +97,7 @@ async function buildFullLeaderboard(): Promise<CacheData> {
       peerMap.set(entry.peerId, {
         participations: participation,
         wins: rewards,
+        source: 'api',
       });
     });
 
@@ -102,6 +108,7 @@ async function buildFullLeaderboard(): Promise<CacheData> {
         peerMap.set(peerId, {
           participations: peer.participations || peer.score || 0,
           wins: peer.rewards || peer.reward || 0,
+          source: 'api',
         });
       }
     });
@@ -119,6 +126,7 @@ async function buildFullLeaderboard(): Promise<CacheData> {
           peerMap.set(peerId, {
             participations: entry.participations || entry.score || 0,
             wins: rewards,
+            source: 'api',
           });
         }
       }
@@ -133,15 +141,29 @@ async function buildFullLeaderboard(): Promise<CacheData> {
           if (existing) {
             existing.participations += 1;
             existing.wins += 1;
+            existing.source = 'both';
           } else {
             peerMap.set(peerId, {
               participations: 1,
               wins: 1,
+              source: 'blockchain',
             });
           }
         }
       });
     }
+
+    // Count peer sources
+    let fromApi = 0;
+    let fromBlockchain = 0;
+    peerMap.forEach((value) => {
+      if (value.source === 'api') fromApi++;
+      else if (value.source === 'blockchain') fromBlockchain++;
+      else if (value.source === 'both') {
+        fromApi++;
+        fromBlockchain++;
+      }
+    });
 
     console.log(`Total unique peers found (API + Blockchain): ${peerMap.size}`);
 
@@ -192,6 +214,11 @@ async function buildFullLeaderboard(): Promise<CacheData> {
         uniqueVoters: uniqueVotersData?.uniqueVoters || uniqueVotersData?.count || 0,
         uniqueVotedPeers: entries.length,
       },
+      peerSources: {
+        fromApi,
+        fromBlockchain,
+        total: peerMap.size,
+      },
     };
 
     // Update cache
@@ -239,6 +266,7 @@ serve(async (req) => {
         total,
         updatedAt: data.updatedAt,
         stats: data.stats,
+        peerSources: data.peerSources,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
