@@ -4,12 +4,12 @@ import { StatsCards } from "@/components/StatsCards";
 import { LeaderboardTable } from "@/components/LeaderboardTable";
 import { SearchBar } from "@/components/SearchBar";
 import { InfoPanel } from "@/components/InfoPanel";
+import { SyncProgressPanel } from "@/components/SyncProgressPanel";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronLeft, ChevronRight, RefreshCw, Database } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 
 interface LeaderboardEntry {
   rank: number;
@@ -51,7 +51,6 @@ const Index = () => {
   const [peerOnline, setPeerOnline] = useState<boolean | null>(null);
   const [peerLoading, setPeerLoading] = useState(false);
   const [peerSources, setPeerSources] = useState<PeerSources>({ fromApi: 0, fromBlockchain: 0, total: 0 });
-  const [syncing, setSyncing] = useState(false);
   const { toast } = useToast();
 
   const fetchLeaderboard = async () => {
@@ -119,39 +118,6 @@ const Index = () => {
     setPeerLoading(true);
     await loadPeerActivity(entry.peerId);
     setPeerLoading(false);
-  };
-
-  const handleManualSync = async () => {
-    try {
-      setSyncing(true);
-      toast({
-        title: "Syncing blockchain data...",
-        description: "This may take a few moments.",
-      });
-
-      const { data, error } = await supabase.functions.invoke('blockchain-listener', {
-        body: {}
-      });
-
-      if (error) throw error;
-
-      toast({
-        title: "Blockchain sync complete",
-        description: `Processed ${data.processedEvents || 0} events from block ${data.fromBlock || 0} to ${data.toBlock || 0}.`,
-      });
-
-      // Refresh leaderboard after sync
-      await fetchLeaderboard();
-    } catch (error) {
-      console.error("Error syncing blockchain:", error);
-      toast({
-        title: "Sync failed",
-        description: "Unable to sync blockchain data. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSyncing(false);
-    }
   };
 
   useEffect(() => {
@@ -226,41 +192,11 @@ const Index = () => {
         {/* Info Panel */}
         <InfoPanel />
 
-        {/* Peer Source Counter */}
-        <div className="mb-4 flex flex-wrap items-center gap-3 p-4 bg-secondary/30 border border-border rounded-md">
-          <div className="flex items-center gap-2">
-            <Database className="h-4 w-4 text-primary" />
-            <span className="text-sm font-mono font-semibold text-foreground">Data Sources:</span>
-          </div>
-          <Badge variant="outline" className="font-mono">
-            API: {peerSources.fromApi}
-          </Badge>
-          <Badge variant="outline" className="font-mono">
-            Blockchain: {peerSources.fromBlockchain}
-          </Badge>
-          <Badge variant="default" className="font-mono">
-            Total Peers: {peerSources.total}
-          </Badge>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleManualSync}
-            disabled={syncing}
-            className="ml-auto font-mono terminal-border"
-          >
-            {syncing ? (
-              <>
-                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                Syncing...
-              </>
-            ) : (
-              <>
-                <Database className="h-4 w-4 mr-2" />
-                Sync Chain Data
-              </>
-            )}
-          </Button>
-        </div>
+        {/* Sync Progress Panel */}
+        <SyncProgressPanel 
+          peerSources={peerSources} 
+          onSyncComplete={fetchLeaderboard} 
+        />
 
         {/* Search and Controls */}
         <div className="mb-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
