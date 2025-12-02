@@ -6,14 +6,29 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Contract ABI for Winner events (minimal - just what we need)
+// Contract ABI for WinnersDeclared event
 const SWARM_ABI = [
-  "event Winner(address indexed winner, bytes32 indexed peerId, uint256 round)",
-  "function getCurrentRound() view returns (uint256)"
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": false, "internalType": "uint256", "name": "round", "type": "uint256" },
+      { "indexed": false, "internalType": "string[]", "name": "winners", "type": "string[]" },
+      { "indexed": false, "internalType": "uint256[]", "name": "rewards", "type": "uint256[]" }
+    ],
+    "name": "WinnersDeclared",
+    "type": "event"
+  }
 ];
 
-const RPC_URL = 'wss://gensyn-testnet.g.alchemy.com/v2/Ee27UnNxpPWcpIbIsXFCH';
+// Use HTTP RPC (more reliable for queries) - Alchemy public endpoint
+const RPC_URL = 'https://gensyn-testnet.g.alchemy.com/public';
 const CONTRACT_ADDRESS = '0xFaD7C5e93f28257429569B854151A1B8DCD404c2';
+
+// Alchemy free tier limit: 10 blocks per eth_getLogs request
+const BATCH_SIZE = 10;
+const DELAY_BETWEEN_REQUESTS_MS = 200; // Avoid rate limits
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -35,86 +50,118 @@ Deno.serve(async (req) => {
       .eq('contract_address', CONTRACT_ADDRESS.toLowerCase())
       .single();
 
-    let fromBlock = metadata?.last_synced_block || 0;
+    // If no metadata, start from a reasonable recent block (not 0)
+    // The contract deployment block or a recent block to avoid scanning millions of blocks
+    const START_BLOCK = 11000000; // Reasonable starting point for Gensyn testnet
+    let fromBlock = metadata?.last_synced_block || START_BLOCK;
     console.log(`Syncing from block: ${fromBlock}`);
 
-    // Connect to blockchain
-    const provider = new ethers.WebSocketProvider(RPC_URL);
+    // Connect to blockchain via HTTP
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
     const contract = new ethers.Contract(CONTRACT_ADDRESS, SWARM_ABI, provider);
 
     // Get current block
     const currentBlock = await provider.getBlockNumber();
     console.log(`Current block: ${currentBlock}`);
 
-    // Fetch historical events in batches
-    const BATCH_SIZE = 10000;
+    // Limit processing to avoid timeout (max ~500 batches per invocation = 5000 blocks)
+    const MAX_BLOCKS_PER_RUN = 5000;
+    const targetBlock = Math.min(fromBlock + MAX_BLOCKS_PER_RUN, currentBlock);
+    
     let processedEvents = 0;
+    let lastProcessedBlock = fromBlock;
 
-    for (let start = fromBlock; start < currentBlock; start += BATCH_SIZE) {
-      const end = Math.min(start + BATCH_SIZE, currentBlock);
-      console.log(`Fetching events from block ${start} to ${end}`);
-
+    for (let start = fromBlock; start < targetBlock; start += BATCH_SIZE) {
+      const end = Math.min(start + BATCH_SIZE - 1, targetBlock);
+      
       try {
-        const filter = contract.filters.Winner();
+        const filter = contract.filters.WinnersDeclared();
         const events = await contract.queryFilter(filter, start, end);
 
-        console.log(`Found ${events.length} Winner events in batch`);
+        if (events.length > 0) {
+          console.log(`Found ${events.length} WinnersDeclared events in blocks ${start}-${end}`);
+        }
 
         // Process events
         for (const event of events) {
           if (!('args' in event) || !event.args) continue;
           
-          const { winner, peerId, round } = event.args as any;
-          const peerIdString = ethers.decodeBytes32String(peerId);
+          const [round, winners, rewards] = event.args as unknown as [bigint, string[], bigint[]];
+          
+          // Get block timestamp
+          const block = await event.getBlock();
+          const eventTimestamp = block ? new Date(Number(block.timestamp) * 1000).toISOString() : new Date().toISOString();
+          
+          // Insert each winner as a separate event
+          for (let i = 0; i < winners.length; i++) {
+            const peerId = winners[i];
+            const reward = rewards[i] ? Number(rewards[i]) : 0;
+            
+            const { error: insertError } = await supabase
+              .from('winner_events')
+              .upsert({
+                peer_id: peerId,
+                block_number: event.blockNumber,
+                transaction_hash: event.transactionHash,
+                round_number: Number(round),
+                event_timestamp: eventTimestamp,
+              }, {
+                onConflict: 'transaction_hash,peer_id',
+                ignoreDuplicates: true
+              });
 
-          // Insert into database (ON CONFLICT DO NOTHING to avoid duplicates)
-          const { error: insertError } = await supabase
-            .from('winner_events')
-            .insert({
-              peer_id: peerIdString,
-              block_number: event.blockNumber,
-              transaction_hash: event.transactionHash,
-              round_number: Number(round),
-              event_timestamp: new Date().toISOString(),
-            })
-            .select()
-            .single();
-
-          if (insertError && !insertError.message.includes('duplicate')) {
-            console.error('Error inserting event:', insertError);
-          } else {
-            processedEvents++;
+            if (insertError && !insertError.message.includes('duplicate')) {
+              console.error('Error inserting event:', insertError);
+            } else {
+              processedEvents++;
+            }
           }
         }
 
-        // Update sync metadata
-        await supabase
-          .from('blockchain_sync_metadata')
-          .upsert({
-            contract_address: CONTRACT_ADDRESS.toLowerCase(),
-            last_synced_block: end,
-            last_sync_timestamp: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'contract_address',
-          });
+        lastProcessedBlock = end;
+        
+        // Rate limiting delay
+        await sleep(DELAY_BETWEEN_REQUESTS_MS);
 
-      } catch (batchError) {
-        console.error(`Error processing batch ${start}-${end}:`, batchError);
+      } catch (batchError: any) {
+        // Handle rate limit specifically
+        if (batchError?.error?.code === 429) {
+          console.log('Rate limited, waiting 1 second...');
+          await sleep(1000);
+          start -= BATCH_SIZE; // Retry this batch
+          continue;
+        }
+        console.error(`Error processing batch ${start}-${end}:`, batchError?.message || batchError);
       }
     }
 
-    await provider.destroy();
+    // Update sync metadata
+    if (lastProcessedBlock > fromBlock) {
+      await supabase
+        .from('blockchain_sync_metadata')
+        .upsert({
+          contract_address: CONTRACT_ADDRESS.toLowerCase(),
+          last_synced_block: lastProcessedBlock,
+          last_sync_timestamp: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'contract_address',
+        });
+    }
 
-    console.log(`Blockchain sync complete. Processed ${processedEvents} new events.`);
+    const remainingBlocks = currentBlock - lastProcessedBlock;
+    console.log(`Blockchain sync complete. Processed ${processedEvents} events. Remaining blocks: ${remainingBlocks}`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Synced ${processedEvents} events from block ${fromBlock} to ${currentBlock}`,
+        message: `Synced ${processedEvents} events from block ${fromBlock} to ${lastProcessedBlock}`,
         fromBlock,
-        toBlock: currentBlock,
+        toBlock: lastProcessedBlock,
+        currentBlock,
         processedEvents,
+        remainingBlocks,
+        needsMoreSync: remainingBlocks > 0,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

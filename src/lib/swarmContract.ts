@@ -53,5 +53,5 @@ export const SWARM_COORDINATOR_ABI = [
   }
 ];
 
-export const CONTRACT_ADDRESS = "0x7745a8FE4b8D2D2c3BB103F8dCae822746F35Da0";
+export const CONTRACT_ADDRESS = "0xFaD7C5e93f28257429569B854151A1B8DCD404c2";
 export const DEFAULT_RPC_URL = "https://gensyn-testnet.g.alchemy.com/public";
