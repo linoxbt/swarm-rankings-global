@@ -6,32 +6,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Contract ABI for WinnersDeclared event
-const SWARM_ABI = [
-  {
-    "anonymous": false,
-    "inputs": [
-      { "indexed": false, "internalType": "uint256", "name": "round", "type": "uint256" },
-      { "indexed": false, "internalType": "string[]", "name": "winners", "type": "string[]" },
-      { "indexed": false, "internalType": "uint256[]", "name": "rewards", "type": "uint256[]" }
-    ],
-    "name": "WinnersDeclared",
-    "type": "event"
-  }
-];
-
-// Use Gensyn public RPC
-const RPC_URL = 'https://rpc.gensyn.ai';
+// Blockscout API for Gensyn testnet (no auth required)
+const BLOCKSCOUT_API = 'https://gensyn-testnet.explorer.alchemy.com/api';
 const CONTRACT_ADDRESS = '0xFaD7C5e93f28257429569B854151A1B8DCD404c2';
 
-// Gensyn testnet chain ID
-const GENSYN_CHAIN_ID = 685685;
+// WinnersDeclared event signature: keccak256("WinnersDeclared(uint256,string[],uint256[])")
+const WINNERS_DECLARED_TOPIC = '0x6573c813f7617c0f7c6e3c89e1eb0a3e77eed41d7f3e30e58e30f4f3e88b4b72';
 
-// Batch size for RPC calls
-const BATCH_SIZE = 2000;
-const MAX_BLOCKS_PER_RUN = 50000;
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Batch size for API calls
+const BATCH_SIZE = 10000;
+const MAX_BLOCKS_PER_RUN = 100000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -44,7 +28,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    console.log('Starting blockchain listener...');
+    console.log('Starting blockchain listener via Blockscout API...');
 
     // Get last synced block from metadata
     const { data: metadata } = await supabase
@@ -53,28 +37,24 @@ Deno.serve(async (req) => {
       .eq('contract_address', CONTRACT_ADDRESS.toLowerCase())
       .single();
 
-    // Start from a reasonable recent block
     const START_BLOCK = 10000000;
     let fromBlock = metadata?.last_synced_block || START_BLOCK;
     console.log(`Syncing from block: ${fromBlock}`);
 
-    // Create provider with static network to skip network detection
-    const staticNetwork = new ethers.Network('gensyn-testnet', GENSYN_CHAIN_ID);
-    const provider = new ethers.JsonRpcProvider(RPC_URL, staticNetwork, {
-      staticNetwork: staticNetwork,
-    });
-    
+    // Get current block number from Blockscout
     let currentBlock: number;
     try {
-      currentBlock = await provider.getBlockNumber();
-      console.log(`Connected to Gensyn RPC. Current block: ${currentBlock}`);
-    } catch (rpcError: any) {
-      console.error('RPC connection failed:', rpcError?.message || rpcError);
+      const blockResponse = await fetch(`${BLOCKSCOUT_API}?module=block&action=eth_block_number`);
+      const blockData = await blockResponse.json();
+      currentBlock = parseInt(blockData.result, 16);
+      console.log(`Current block from Blockscout: ${currentBlock}`);
+    } catch (blockError: any) {
+      console.error('Failed to get current block:', blockError?.message);
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'RPC connection failed',
-          details: rpcError?.message || 'Could not connect to Gensyn RPC',
+          error: 'Failed to get current block',
+          details: blockError?.message || 'Blockscout API error',
         }),
         {
           status: 503,
@@ -83,64 +63,73 @@ Deno.serve(async (req) => {
       );
     }
 
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, SWARM_ABI, provider);
-
-    // Calculate target block for this run
     const targetBlock = Math.min(fromBlock + MAX_BLOCKS_PER_RUN, currentBlock);
     const totalBlocksToSync = currentBlock - fromBlock;
-    const blocksThisRun = targetBlock - fromBlock;
     
     let processedEvents = 0;
     let lastProcessedBlock = fromBlock;
     let batchErrors = 0;
 
+    // Process in batches
     for (let start = fromBlock; start < targetBlock; start += BATCH_SIZE) {
       const end = Math.min(start + BATCH_SIZE - 1, targetBlock);
       
       try {
-        const filter = contract.filters.WinnersDeclared();
-        const events = await contract.queryFilter(filter, start, end);
-
-        if (events.length > 0) {
-          console.log(`Found ${events.length} WinnersDeclared events in blocks ${start}-${end}`);
+        // Use Blockscout getLogs API
+        const logsUrl = `${BLOCKSCOUT_API}?module=logs&action=getLogs&address=${CONTRACT_ADDRESS}&fromBlock=${start}&toBlock=${end}`;
+        console.log(`Fetching logs for blocks ${start}-${end}`);
+        
+        const logsResponse = await fetch(logsUrl);
+        const logsData = await logsResponse.json();
+        
+        if (logsData.status === '1' && logsData.result && logsData.result.length > 0) {
+          console.log(`Found ${logsData.result.length} logs in blocks ${start}-${end}`);
           
-          // Process events in batch
-          for (const event of events) {
-            if (!('args' in event) || !event.args) continue;
-            
-            const [round, winners, rewards] = event.args as unknown as [bigint, string[], bigint[]];
-            
-            // Get block timestamp (batch these to reduce calls)
-            let eventTimestamp = new Date().toISOString();
+          // Process each log
+          for (const log of logsData.result) {
             try {
-              const block = await event.getBlock();
-              if (block) {
-                eventTimestamp = new Date(Number(block.timestamp) * 1000).toISOString();
+              // Decode the event data
+              const abiCoder = new ethers.AbiCoder();
+              const decoded = abiCoder.decode(
+                ['uint256', 'string[]', 'uint256[]'],
+                log.data
+              );
+              
+              const round = Number(decoded[0]);
+              const winners: string[] = decoded[1];
+              const rewards: bigint[] = decoded[2];
+              
+              if (winners.length > 0) {
+                // Get block timestamp
+                const blockNumber = parseInt(log.blockNumber, 16);
+                const timestamp = log.timeStamp 
+                  ? new Date(parseInt(log.timeStamp, 16) * 1000).toISOString()
+                  : new Date().toISOString();
+                
+                // Insert each winner as a separate event
+                const insertBatch = winners.map((peerId, i) => ({
+                  peer_id: peerId,
+                  block_number: blockNumber,
+                  transaction_hash: log.transactionHash,
+                  round_number: round,
+                  event_timestamp: timestamp,
+                }));
+
+                const { error: insertError } = await supabase
+                  .from('winner_events')
+                  .upsert(insertBatch, {
+                    onConflict: 'transaction_hash,peer_id',
+                    ignoreDuplicates: true
+                  });
+
+                if (insertError && !insertError.message.includes('duplicate')) {
+                  console.error('Error inserting events:', insertError);
+                } else {
+                  processedEvents += winners.length;
+                }
               }
-            } catch (e) {
-              // Use current time if block fetch fails
-            }
-            
-            // Insert each winner as a separate event
-            const insertBatch = winners.map((peerId, i) => ({
-              peer_id: peerId,
-              block_number: event.blockNumber,
-              transaction_hash: event.transactionHash,
-              round_number: Number(round),
-              event_timestamp: eventTimestamp,
-            }));
-
-            const { error: insertError } = await supabase
-              .from('winner_events')
-              .upsert(insertBatch, {
-                onConflict: 'transaction_hash,peer_id',
-                ignoreDuplicates: true
-              });
-
-            if (insertError && !insertError.message.includes('duplicate')) {
-              console.error('Error inserting events:', insertError);
-            } else {
-              processedEvents += winners.length;
+            } catch (decodeError: any) {
+              console.error('Error decoding log:', decodeError?.message);
             }
           }
         }
@@ -151,14 +140,10 @@ Deno.serve(async (req) => {
         batchErrors++;
         console.error(`Error processing batch ${start}-${end}:`, batchError?.message || batchError);
         
-        // If too many errors, try smaller batch
         if (batchErrors > 5) {
           console.log('Too many errors, stopping this run');
           break;
         }
-        
-        // Brief delay on error
-        await sleep(500);
       }
     }
 
