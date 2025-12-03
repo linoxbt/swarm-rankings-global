@@ -3,15 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Database, RefreshCw, Play, Square, CheckCircle, AlertCircle } from "lucide-react";
+import { RefreshCw, Play, Square, CheckCircle, AlertCircle, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface SyncProgressPanelProps {
-  peerSources: {
-    fromApi: number;
-    fromBlockchain: number;
-    total: number;
-  };
   onSyncComplete?: () => void;
 }
 
@@ -29,7 +24,7 @@ interface SyncStatus {
   lastSyncTime: string | null;
 }
 
-export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressPanelProps) => {
+export const SyncProgressPanel = ({ onSyncComplete }: SyncProgressPanelProps) => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
     isRunning: false,
     autoSync: false,
@@ -43,7 +38,35 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
     error: null,
     lastSyncTime: null,
   });
+  const [totalNodesInDb, setTotalNodesInDb] = useState(0);
   const { toast } = useToast();
+
+  // Fetch total unique nodes from database
+  const fetchTotalNodes = useCallback(async () => {
+    try {
+      const { count, error } = await supabase
+        .from('winner_events')
+        .select('peer_id', { count: 'exact', head: true });
+      
+      if (!error && count !== null) {
+        // Get distinct count
+        const { data } = await supabase
+          .from('winner_events')
+          .select('peer_id');
+        
+        if (data) {
+          const uniquePeers = new Set(data.map(d => d.peer_id));
+          setTotalNodesInDb(uniquePeers.size);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching node count:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTotalNodes();
+  }, [fetchTotalNodes]);
 
   const runSync = useCallback(async (): Promise<boolean> => {
     try {
@@ -70,10 +93,13 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
         lastSyncTime: new Date().toISOString(),
       }));
 
+      // Refresh node count after sync
+      await fetchTotalNodes();
+
       if (!needsMore) {
         toast({
           title: "Sync Complete",
-          description: `All blockchain data synchronized. Total events: ${syncStatus.totalProcessedEvents + (data.processedEvents || 0)}`,
+          description: `Blockchain data synchronized.`,
         });
         onSyncComplete?.();
       }
@@ -94,7 +120,7 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
       });
       return false;
     }
-  }, [toast, onSyncComplete, syncStatus.totalProcessedEvents]);
+  }, [toast, onSyncComplete, fetchTotalNodes]);
 
   // Auto-sync loop
   useEffect(() => {
@@ -107,7 +133,6 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
       const needsMore = await runSync();
       
       if (mounted && needsMore && syncStatus.autoSync) {
-        // Continue after a short delay
         timeoutId = setTimeout(autoSyncLoop, 2000);
       }
     };
@@ -151,27 +176,10 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
     : 0;
 
   return (
-    <div className="mb-4 p-4 bg-secondary/30 border border-border rounded-md space-y-4">
-      {/* Data Sources Row */}
+    <div className="mb-4 p-4 bg-secondary/30 border border-border rounded-md space-y-3">
+      {/* Sync Controls Row */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Database className="h-4 w-4 text-primary" />
-          <span className="text-sm font-mono font-semibold text-foreground">Data Sources:</span>
-        </div>
-        <Badge variant="outline" className="font-mono">
-          API: {formatNumber(peerSources.fromApi)}
-        </Badge>
-        <Badge variant="outline" className="font-mono">
-          Blockchain: {formatNumber(peerSources.fromBlockchain)}
-        </Badge>
-        <Badge variant="default" className="font-mono">
-          Total Peers: {formatNumber(peerSources.total)}
-        </Badge>
-      </div>
-
-      {/* Sync Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm font-mono text-muted-foreground">Blockchain Sync:</span>
+        <span className="text-sm font-mono text-muted-foreground">Chain Sync:</span>
         
         {!syncStatus.autoSync ? (
           <>
@@ -183,7 +191,7 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
               className="font-mono terminal-border"
             >
               <Play className="h-4 w-4 mr-2" />
-              Auto-Sync All
+              Auto-Sync
             </Button>
             <Button
               variant="ghost"
@@ -204,7 +212,7 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
             className="font-mono"
           >
             <Square className="h-4 w-4 mr-2" />
-            Stop Sync
+            Stop
           </Button>
         )}
 
@@ -218,7 +226,7 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
         {!syncStatus.isRunning && syncStatus.remainingBlocks === 0 && syncStatus.lastSyncTime && (
           <Badge variant="default" className="font-mono bg-emerald-600">
             <CheckCircle className="h-3 w-3 mr-1" />
-            Fully Synced
+            Synced
           </Badge>
         )}
 
@@ -228,25 +236,27 @@ export const SyncProgressPanel = ({ peerSources, onSyncComplete }: SyncProgressP
             Error
           </Badge>
         )}
+
+        {/* Node count */}
+        {totalNodesInDb > 0 && (
+          <Badge variant="outline" className="font-mono ml-auto">
+            <Users className="h-3 w-3 mr-1" />
+            {formatNumber(totalNodesInDb)} nodes synced
+          </Badge>
+        )}
       </div>
 
-      {/* Progress Bar (show when syncing or has progress) */}
+      {/* Progress Bar */}
       {(syncStatus.isRunning || syncStatus.remainingBlocks > 0 || syncStatus.lastSyncTime) && (
-        <div className="space-y-2">
-          <div className="flex justify-between text-xs font-mono text-muted-foreground">
-            <span>Block {formatNumber(syncStatus.toBlock)} / {formatNumber(syncStatus.currentBlock)}</span>
-            <span>{overallProgress}% synced</span>
-          </div>
+        <div className="space-y-1">
           <Progress value={overallProgress} className="h-2" />
-          <div className="flex flex-wrap justify-between text-xs font-mono text-muted-foreground">
+          <div className="flex justify-between text-xs font-mono text-muted-foreground">
             <span>
               {syncStatus.remainingBlocks > 0 
-                ? `${formatNumber(syncStatus.remainingBlocks)} blocks remaining`
-                : 'All blocks synced'}
+                ? `${formatNumber(syncStatus.remainingBlocks)} blocks left`
+                : 'Complete'}
             </span>
-            <span>
-              {syncStatus.totalProcessedEvents > 0 && `${formatNumber(syncStatus.totalProcessedEvents)} events processed`}
-            </span>
+            <span>{overallProgress}%</span>
           </div>
         </div>
       )}
