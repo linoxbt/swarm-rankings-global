@@ -22,7 +22,7 @@ const SWARM_ABI = [
 
 // Use Gensyn public RPC (no rate limits like Alchemy free tier)
 const RPC_URL = 'https://rpc.gensyn.ai';
-const FALLBACK_RPC_URL = 'https://gensyn-testnet.g.alchemy.com/public';
+const FALLBACK_RPC_URL = 'https://gensyn-testnet.g.alchemy.com/v2/public';
 const CONTRACT_ADDRESS = '0xFaD7C5e93f28257429569B854151A1B8DCD404c2';
 
 // Larger batch size for public RPC (adjust if errors occur)
