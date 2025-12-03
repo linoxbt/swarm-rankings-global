@@ -20,14 +20,16 @@ const SWARM_ABI = [
   }
 ];
 
-// Use Gensyn public RPC (no rate limits like Alchemy free tier)
+// Use Gensyn public RPC
 const RPC_URL = 'https://rpc.gensyn.ai';
-const FALLBACK_RPC_URL = 'https://gensyn-testnet.g.alchemy.com/v2/public';
 const CONTRACT_ADDRESS = '0xFaD7C5e93f28257429569B854151A1B8DCD404c2';
 
-// Larger batch size for public RPC (adjust if errors occur)
+// Gensyn testnet chain ID
+const GENSYN_CHAIN_ID = 685685;
+
+// Batch size for RPC calls
 const BATCH_SIZE = 2000;
-const MAX_BLOCKS_PER_RUN = 50000; // Process more blocks per run
+const MAX_BLOCKS_PER_RUN = 50000;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -56,19 +58,29 @@ Deno.serve(async (req) => {
     let fromBlock = metadata?.last_synced_block || START_BLOCK;
     console.log(`Syncing from block: ${fromBlock}`);
 
-    // Try primary RPC, fallback to secondary
-    let provider: ethers.JsonRpcProvider;
-    let currentBlock: number;
+    // Create provider with static network to skip network detection
+    const staticNetwork = new ethers.Network('gensyn-testnet', GENSYN_CHAIN_ID);
+    const provider = new ethers.JsonRpcProvider(RPC_URL, staticNetwork, {
+      staticNetwork: staticNetwork,
+    });
     
+    let currentBlock: number;
     try {
-      provider = new ethers.JsonRpcProvider(RPC_URL);
       currentBlock = await provider.getBlockNumber();
-      console.log(`Connected to primary RPC. Current block: ${currentBlock}`);
-    } catch (rpcError) {
-      console.log('Primary RPC failed, trying fallback...');
-      provider = new ethers.JsonRpcProvider(FALLBACK_RPC_URL);
-      currentBlock = await provider.getBlockNumber();
-      console.log(`Connected to fallback RPC. Current block: ${currentBlock}`);
+      console.log(`Connected to Gensyn RPC. Current block: ${currentBlock}`);
+    } catch (rpcError: any) {
+      console.error('RPC connection failed:', rpcError?.message || rpcError);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'RPC connection failed',
+          details: rpcError?.message || 'Could not connect to Gensyn RPC',
+        }),
+        {
+          status: 503,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     const contract = new ethers.Contract(CONTRACT_ADDRESS, SWARM_ABI, provider);
