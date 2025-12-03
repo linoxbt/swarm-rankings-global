@@ -25,12 +25,6 @@ interface Stats {
   uniqueVotedPeers: number;
 }
 
-interface PeerSources {
-  fromApi: number;
-  fromBlockchain: number;
-  total: number;
-}
-
 const Index = () => {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [allEntries, setAllEntries] = useState<LeaderboardEntry[]>([]);
@@ -50,7 +44,6 @@ const Index = () => {
   const [peerLastSeen, setPeerLastSeen] = useState<string | null>(null);
   const [peerOnline, setPeerOnline] = useState<boolean | null>(null);
   const [peerLoading, setPeerLoading] = useState(false);
-  const [peerSources, setPeerSources] = useState<PeerSources>({ fromApi: 0, fromBlockchain: 0, total: 0 });
   const { toast } = useToast();
 
   const fetchLeaderboard = async () => {
@@ -67,7 +60,6 @@ const Index = () => {
       setAllEntries(data.entries || []);
       setStats(data.stats);
       setUpdatedAt(data.updatedAt);
-      setPeerSources(data.peerSources || { fromApi: 0, fromBlockchain: 0, total: 0 });
       setCurrentPage(0);
     } catch (error) {
       console.error("Error fetching leaderboard:", error);
@@ -193,10 +185,7 @@ const Index = () => {
         <InfoPanel />
 
         {/* Sync Progress Panel */}
-        <SyncProgressPanel 
-          peerSources={peerSources} 
-          onSyncComplete={fetchLeaderboard} 
-        />
+        <SyncProgressPanel onSyncComplete={fetchLeaderboard} />
 
         {/* Search and Controls */}
         <div className="mb-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
